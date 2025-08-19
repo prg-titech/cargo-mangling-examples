@@ -1,4 +1,4 @@
-# Cargo Dependency Name Mangling Examples (with `url` crate)
+# Name Mangling Problems on Cargo
 
 When two distinct versions of the same crate are required simultaneously, Cargo resolves the conflict by **name-mangling crate identifiers** and assigning them disjoint namespaces. From the resolver’s perspective, this is a valid solution to version constraints.  
 
@@ -9,6 +9,27 @@ This repository demonstrates how **Cargo’s multi-version resolution** (using [
 ---
 
 ## Project Structure
+```mermaid
+graph TD
+    app["app"]
+    mid_a["mid-a"]
+    mid_b["mid-b"]
+
+    subgraph urls["url crates"]
+        direction LR
+        url1["url v1"]
+        dummy["⟵ incompatible ⟶"]
+        url2["url v2"]
+    end
+
+    app --> mid_a
+    app --> mid_b
+    mid_a -- "depends on v1.0" --> url1
+    mid_b -- "depends on v2.0" --> url2
+
+    classDef note fill:transparent,stroke:transparent,color:#888,font-style:italic
+    class dummy note
+```
 
 ```
 cargo-mangling/
