@@ -1,0 +1,5 @@
+[registries]
+local = { index = "file://tmp/local-index" }
+
+[registry]
+default = "local"

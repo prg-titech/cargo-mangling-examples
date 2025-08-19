@@ -1,0 +1,8 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mid_a = { path = "../mid-a" }
+mid_b = { path = "../mid-b" }
