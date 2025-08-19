@@ -1,185 +1,193 @@
-# Cargo Dependency Name Mangling Examples (with `url` crate)
+# Name Mangling Problems on Cargo
+The Rust package manager Cargo permits multiple versions of the same crate to coexist within a single build. To prevent unintended interactions, Cargo employs **crate name mangling**, assigning each version a distinct identifier and isolating it within a separate namespace. From the perspective of the dependency resolver, this strategy provides a mechanism for satisfying version constraints.  
 
-This repository demonstrates how **Cargo resolves multiple versions of the same crate** (here: [`url`](https://crates.io/crates/url)) and how this can lead to **subtle incompatibilities**.  
+From the perspective of client code, however, such strategy can change program behavior in two ways:  
+- **Type incompatibility**: crates may export items under identical nominal paths (e.g., `url::Url`), yet these are treated as distinct and incompatible types, even when their structural definitions coincide.
+- **Semantic incompatibility**: functions with identical type signatures may exhibit divergent semantic contracts across versions, yielding subtle behavioral incompatibilities that are not detected at compile time.
 
-When two different versions of the same crate are simultaneously required, Cargo’s resolver allows them to coexist by **name-mangling the crate identifiers internally**. From Cargo’s point of view, this is a successful dependency resolution.  
-However, from the program’s perspective, the result can be surprising: the **same nominal type name** (e.g., `url::Url`) is actually two different types, one from `url v1`, the other from `url v2`.  
-
-This repository builds a set of **minimal examples** to illustrate the difference between:
-- **Compile-time errors** that arise when different types are directly mixed, and  
-- **Runtime bugs** that appear when type incompatibilities are hidden behind string conversions or different semantic assumptions.
-
-The purpose is to highlight how dependency resolution can affect program meaning, and why exposing dependency-owned types in public APIs is fragile.
+This repository demonstrates how **Cargo’s name-mangling strategy** (using [`url`](https://crates.io/crates/url) as an example) can lead to such problems.
 
 ---
 
 ## Project Structure
+```mermaid
+graph TD
+    app["app"]
+    mid_a["mid-a"]
+    mid_b["mid-b"]
 
----
+    subgraph urls["url crates"]
+        direction LR
+        url1["url v1"]
+        dummy["⟵ incompatible ⟶"]
+        url2["url v2"]
+    end
+
+    app --> mid_a
+    app --> mid_b
+    mid_a -- "depends on v1.0" --> url1
+    mid_b -- "depends on v2.0" --> url2
+
+    classDef note fill:transparent,stroke:transparent,color:#888,font-style:italic
+    class dummy note
+```
+
+```
 cargo-mangling/
 ├── mid-a/        # depends on url v1, re-exports url::Url
 ├── mid-b/        # depends on url v2, re-exports url::Url + extra helpers
 └── app/
     └── src/
         └── bin/
-            ├── ng1.rs  # compile-time error
-            ├── ng2.rs  # runtime error (canonicalization)
-            ├── ng3.rs  # runtime error (dictionary key mismatch)
-            ├── ng4.rs  # runtime error (string concat vs URL join)
+            ├── ng1.rs  # compile-time error (type incompatibility)
+            ├── ng2.rs  # runtime error (semantic incompatibility)
             ├── ok1.rs  # works (disjoint usage)
             ├── ok2.rs  # works (string bridge, safe)
             └── ok3.rs  # works (explicit conversion to v2 Url)
----
+```
 
 - `mid_a` depends on `url = "1"` and re-exports `url::Url`.  
 - `mid_b` depends on `url = "2"` and re-exports `url::Url`, with additional helper APIs.  
 - `app` imports both and provides multiple binaries (`src/bin/*.rs`) to demonstrate different scenarios.
 
----
+## Initial Setup
+```bash
+cargo build --manifest-path mid-a/Cargo.toml && cargo build --manifest-path mid-b/Cargo.toml
+```
 
 ## Scenarios
 
-Below we describe the scenarios. Each can be built or run independently (`cargo build --bin ...`, `cargo run --bin ...`).  
+| Scenario | Mechanism                        | Build | Runtime | Risk profile                | 
+| -------- | -------------------------------- | ----- | ------- | --------------------------- | 
+| **OK1**  | Disjoint usage                   | ✅     | ✅       | ⚠ **Hidden version mixture in a program**      | 
+| **OK2**  | String bridge                    | ✅     | ✅       | ⚠ **Hidden semantic incompatibility** | 
+| **OK3**  | Explicit parse bridge            | ✅     | ✅       | ⚠ **Maintainability risk**  | 
+| **NG1**  | Type mismatch         | ❌     | –       | **Compile-time safe**, but too conservative | 
+| **NG2**  | Semantic drift across versions | ✅     | ❌       | ❌ **Hard to find the cause**   | 
 
-They are grouped into **OK** (program builds and runs successfully) and **NG** (the program fails, either at compile time or at runtime).
-
----
+```bash
+cd app/
+cargo run --bin ok1
+cargo run --bin ok2
+cargo run --bin ok3 
+cargo build --bin ng1 
+cargo build --bin ng2
+cargo run --bin ng2
+```
 
 ### OK1 (disjoint usage)
 
 Use `mid_a::Url` and `mid_b::Url` independently, never crossing them.  
 → Both versions of `url` coexist without issue.
 
----
-~/cargo-mangling/app$ cargo run --bin ok1
+```bash
+~/app$ cargo run --bin ok1
    Compiling app v0.1.0 (/home/user/cargo-mangling/app)
     Finished `dev` profile [unoptimized + debuginfo]
      Running `target/debug/ok1`
 u1 = https://example.com/
----
+```
 
 **Observation:** As long as the data flows are separated, multiple versions can safely coexist.
-
----
 
 ### OK2 (string bridge)
 
 Convert `mid_a::Url` to a `String` and pass it across the boundary.  
 → Works, because standard library types like `String` are unaffected by crate versioning.
 
----bash
-~/cargo-mangling/app$ cargo run --bin ok2
+```bash
+~/app$ cargo run --bin ok2
     Finished `dev` profile [unoptimized + debuginfo]
      Running `target/debug/ok2`
----
+```
 
-**Observation:** Stringly-typed bridges preserve compilation, but may hide semantic drift.
-
----
+**Observation:** Stringly-typed bridges preserve compilation, but may hide semantic incompatibility.
 
 ### OK3 (explicit type bridge)
 
 Convert the string to `mid_b::Url` immediately via `Url::parse`.  
 → Safe, no hidden mismatch, since everything beyond the conversion uses only `url v2`’s type.
 
----bash
-$ cargo run --bin ok3
+```bash
+~/app$ cargo run --bin ok3
     Finished `dev` profile [unoptimized + debuginfo]
      Running `target/debug/ok3`
 ok3: bridged mid_a::Url -> mid_b::Url via string (safe)
----
+```
 
-**Observation:** Explicit conversion is the safest approach when bridging between versions.
+**Observation:** Explicit conversion establishes a clear type boundary and avoids mixed-type flows.
 
----
+**⚠Note** However, this approach implicitly relies on the stability of `url v1`’s string output and `url v2`’s parser behavior.
+Any change in canonicalization (lowercasing, default port removal, percent-decoding) could silently break this bridge.
+Thus, while it appears safe at runtime, it carries hidden maintainability risks.
 
 ### NG1 (compile-time type error)
 
 Passing `mid_a::Url` (from `url v1`) into a function expecting `mid_b::Url` (from `url v2`).  
 → Different crate IDs → different types → **compile-time failure**.
 
----bash
-~/cargo-mangling/app$ cargo build --bin ng1
+```bash
+~/app$ cargo build --bin ng1
 error[E0308]: mismatched types
   --> src/bin/ng1.rs:3:20
    |
 3  |     mid_b::consume(u);
-   |                    ^ expected `mid_b::Url`, found `mid_a::Url`
----
+   |     -------------- ^ expected `mid_b::Url`, found `mid_a::Url`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: two different versions of crate `url` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> /.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-1.7.2/src/lib.rs:154:1
+    |
+154 | pub struct Url {
+    | ^^^^^^^^^^^^^^ this is the found type `mid_a::Url`
+    |
+   ::: /home/yudaitnb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.4/src/lib.rs:227:1
+    |
+227 | pub struct Url {
+    | ^^^^^^^^^^^^^^ this is the expected type `mid_b::Url`
+    |
+   ::: src/bin/ng1.rs:4:13
+    |
+4   |     let u = mid_a::make();   
+    |             ----- one version of crate `url` used here, as a dependency of crate `mid_a`
+...
+12  |     mid_b::consume(u);
+    |     ----- one version of crate `url` used here, as a dependency of crate `mid_b`
+    = help: you can use `cargo tree` to explore your dependency tree
+note: function defined here
+   --> /home/yudaitnb/cargo-mangling/mid-b/src/lib.rs:2:8
+    |
+2   | pub fn consume(_u: Url) {}
+    |        ^^^^^^^
+```
 
-**Observation:** This is the *best failure mode*: the incompatibility is caught at compile time.
+**Observation:** This is the *best failure mode*: the incompatibility is caught at compile time. This error is reported by the rustc compiler as being caused by the version selection.
 
----
+**Note:** However, this also means that the build will fail until `mid_a` is updated. For the `app` developer to use `mid_b`, which depends on version 2 of the `URL` package, they must push the `mid_a` developers to provide an update.
 
-### NG2 (string canonicalization mismatch)
+### NG2 (semantic mismatch across versions)
 
-Expecting `parsed.as_str() == original`, but `url v2` canonicalizes:  
-- hostnames are lowercased,  
-- default ports like `:80` are removed,  
-- `%7E` is normalized to `~`.  
+The helper `port_or_default` returns `Option<u16>`, but its semantics diverge:  
+- In `url v1`, `gopher://` is treated as having a default port `70`.  
+- In `url v2.2.0~`, `gopher` is not considered special, so the result is `None` when no port is specified.  
 
-→ Build succeeds, but runtime assertion fails.
+**Note:** This behavioral change is not explicitly mentioned in the `url` crate’s CHANGELOG, but according to the commit history it appears to have been introduced between [v2.2.0](https://docs.rs/url/2.2.0/url/struct.Url.html#method.port_or_known_default) and [v2.1.1](https://docs.rs/url/2.1.1/url/struct.Url.html#method.port_or_known_default).
 
----bash
-~/cargo-mangling/app$ cargo run --bin ng2
-thread 'main' panicked at ...:
-assertion `left == right` failed: mid_b: canonicalization changed the string
-  left: "http://example.com/%7Euser"
- right: "http://EXAMPLE.com:80/%7Euser"
----
 
-**Observation:** Stringly-typed bridges can compile, but semantic changes surface at runtime.
+```bash
+~/app$ cargo run --bin ng2
+thread 'main' panicked at 'NG2: port_or_default mismatch:
+  v1: Some(70)
+  v2: None
+  src: gopher://example.com/'
+```
 
----
-
-### NG3 (dictionary key mismatch)
-
-Store a value under the **original string**, but look it up using the **canonicalized string** from `url v2`.  
-→ Runtime panic: key not found.
-
----bash
-~/cargo-mangling/app$ cargo run --bin ng3
-thread 'main' panicked at ...:
-mid_b: key not found after canonicalization
----
-
-**Observation:** Differences in canonicalization can break equality assumptions silently.
-
----
-
-### NG4 (naive join vs. URL join)
-
-Compare naive string concatenation with `Url::join`.  
-→ Runtime panic: semantic mismatch (`https://example.com/a/b/../c` vs `https://example.com/a/c`).
-
----bash
-~/cargo-mangling/app$ cargo run --bin ng4
-thread 'main' panicked at ...:
-assertion `left == right` failed: mid_b: naive string concat != URL join
-  left: "https://example.com/a/b/../c"
- right: "https://example.com/a/c"
----
-
-**Observation:** Semantics of relative URL resolution cannot be captured by string concatenation.
-
----
-
-## Key Lessons
-
-- Cargo permits multiple major versions of the same crate to coexist.  
-- From Cargo’s perspective this is a *successful resolution*, but from the program’s perspective it can cause breakage.  
-- Two crates exposing the same nominal type name (`url::Url`) from different versions define **distinct types**.  
-- Problems surface when these types (or their string representations) cross public boundaries.  
-
-**Recommendations for library authors:**
-- Do not re-export dependency-owned types in public APIs.  
-- Use explicit conversion (bridge to one canonical version).  
-- Avoid stringly-typed bridges unless semantics are guaranteed stable.
-
----
+**Observation:** The types line up perfectly (`Option<u16>`), yet behavior differs.  
+This mismatch only surfaces at runtime as a failed assertion.
 
 ## References
 
+- [HOW RUST SOLVED DEPENDENCY HELL](https://stephencoakley.com/2019/04/24/how-rust-solved-dependency-hell)
 - [Cargo Book – Registries](https://doc.rust-lang.org/cargo/reference/registries.html)  
-- [Cargo Book – Resolver](https://doc.rust-lang.org/cargo/reference/resolver.html)  
-- [WHATWG URL Standard – canonicalization rules](https://url.spec.whatwg.org/)  
+- [Cargo Book – Resolver](https://doc.rust-lang.org/cargo/reference/resolver.html) 
