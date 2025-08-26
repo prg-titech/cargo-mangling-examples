@@ -190,5 +190,4 @@ This mismatch only surfaces at runtime as a failed assertion.
 
 - [HOW RUST SOLVED DEPENDENCY HELL](https://stephencoakley.com/2019/04/24/how-rust-solved-dependency-hell)
 - [Cargo Book – Registries](https://doc.rust-lang.org/cargo/reference/registries.html)  
-- [Cargo Book – Resolver](https://doc.rust-lang.org/cargo/reference/resolver.html)
 - [Cargo Book - Dependency Resolution](https://doc.rust-lang.org/cargo/reference/resolver.html#version-incompatibility-hazards)
