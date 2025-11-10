@@ -41,6 +41,7 @@ cargo-mangling/
         └── bin/
             ├── ng1.rs  # compile-time error (type incompatibility)
             ├── ng2.rs  # runtime error (semantic incompatibility)
+            ├── ng3.rs  # compile-time error (trait incompatibility)
             ├── ok1.rs  # works (disjoint usage)
             ├── ok2.rs  # works (string bridge, safe)
             └── ok3.rs  # works (explicit conversion to v2 Url)
@@ -59,67 +60,17 @@ cargo build --manifest-path mid-a/Cargo.toml && cargo build --manifest-path mid-
 
 | Scenario | Mechanism                        | Build | Runtime | Risk profile                | 
 | -------- | -------------------------------- | ----- | ------- | --------------------------- | 
-| **OK1**  | Disjoint usage                   | ✅     | ✅       | ⚠ **Hidden version mixture in a program**      | 
-| **OK2**  | String bridge                    | ✅     | ✅       | ⚠ **Hidden semantic incompatibility** | 
-| **OK3**  | Explicit parse bridge            | ✅     | ✅       | ⚠ **Maintainability risk**  | 
-| **NG1**  | Type mismatch         | ❌     | –       | **Compile-time safe**, but too conservative | 
+| **NG1**  | Type mismatch         | ❌     | –       | **Compile-time safe**, not fixable at the application layer alone. | 
 | **NG2**  | Semantic drift across versions | ✅     | ❌       | ❌ **Hard to find the cause**   | 
+| **NG3**  | Trait-boound mismatch | ❌     | –       | **Compile-time safe**, not fixable at the application layer alone. | 
 
 ```bash
 cd app/
-cargo run --bin ok1
-cargo run --bin ok2
-cargo run --bin ok3 
 cargo build --bin ng1 
 cargo build --bin ng2
 cargo run --bin ng2
+cargo build --bin ng3
 ```
-
-### OK1 (disjoint usage)
-
-Use `mid_a::Url` and `mid_b::Url` independently, never crossing them.  
-→ Both versions of `url` coexist without issue.
-
-```bash
-~/app$ cargo run --bin ok1
-   Compiling app v0.1.0 (/home/user/cargo-mangling/app)
-    Finished `dev` profile [unoptimized + debuginfo]
-     Running `target/debug/ok1`
-u1 = https://example.com/
-```
-
-**Observation:** As long as the data flows are separated, multiple versions can safely coexist.
-
-### OK2 (string bridge)
-
-Convert `mid_a::Url` to a `String` and pass it across the boundary.  
-→ Works, because standard library types like `String` are unaffected by crate versioning.
-
-```bash
-~/app$ cargo run --bin ok2
-    Finished `dev` profile [unoptimized + debuginfo]
-     Running `target/debug/ok2`
-```
-
-**Observation:** Stringly-typed bridges preserve compilation, but may hide semantic incompatibility.
-
-### OK3 (explicit type bridge)
-
-Convert the string to `mid_b::Url` immediately via `Url::parse`.  
-→ Safe, no hidden mismatch, since everything beyond the conversion uses only `url v2`’s type.
-
-```bash
-~/app$ cargo run --bin ok3
-    Finished `dev` profile [unoptimized + debuginfo]
-     Running `target/debug/ok3`
-ok3: bridged mid_a::Url -> mid_b::Url via string (safe)
-```
-
-**Observation:** Explicit conversion establishes a clear type boundary and avoids mixed-type flows.
-
-**⚠Note** However, this approach implicitly relies on the stability of `url v1`’s string output and `url v2`’s parser behavior.
-Any change in canonicalization (lowercasing, default port removal, percent-decoding) could silently break this bridge.
-Thus, while it appears safe at runtime, it carries hidden maintainability risks.
 
 ### NG1 (compile-time type error)
 
@@ -162,9 +113,8 @@ note: function defined here
     |        ^^^^^^^
 ```
 
-**Observation:** This is the *best failure mode*: the incompatibility is caught at compile time. This error is reported by the rustc compiler as being caused by the version selection.
+**Observation:** ***Compile-time safe (caught by the type system)***, but surprising when identical-looking type paths come from different crate versions.
 
-**Note:** However, this also means that the build will fail until `mid_a` is updated. For the `app` developer to use `mid_b`, which depends on version 2 of the `URL` package, they must push the `mid_a` developers to provide an update.
 
 ### NG2 (semantic mismatch across versions)
 
@@ -183,8 +133,37 @@ thread 'main' panicked at 'NG2: port_or_default mismatch:
   src: gopher://example.com/'
 ```
 
-**Observation:** The types line up perfectly (`Option<u16>`), yet behavior differs.  
-This mismatch only surfaces at runtime as a failed assertion.
+**Observation:** ***Not compile-time safe***. This mismatch only surfaces at runtime as a failed assertion.
+
+
+### NG3 (compile-time trait identity mismatch across versions)
+
+A value whose type is expressed via `impl url::form_urlencoded::Target` on the v1 side (from `mid_a`) cannot satisfy a generic bound `T: url::form_urlencoded::Target` on the v2 side (from `mid_b`).
+Even though the path looks identical in source, the trait identities differ across versions, so the trait bound is not satisfied.
+
+```bash
+~/app$ cargo run --bin ng3
+error[E0277]: the trait bound `impl url::form_urlencoded::Target: form_urlencoded::Target` is not satisfied
+  --> src/bin/ng3.rs:7:27
+   |
+ 7 |     mid_b::consume_target(t);
+   |     --------------------- ^ the trait `form_urlencoded::Target` is not implemented for `impl url::form_urlencoded::Target`
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = help: the following other types implement trait `form_urlencoded::Target`:
+             &'a mut String
+             String
+             url::UrlQuery<'a>
+note: required by a bound in `consume_target`
+  --> /home/yudaitnb/cargo-mangling-examples/mid-b/src/lib.rs:11:26
+   |
+11 | pub fn consume_target<T: url::form_urlencoded::Target>(mut t: T) {
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `consume_target`
+```
+
+**Observation:** ***Compile-time safe (caught by the type system)***, but surprising when identical-looking trait paths come from different crate versions.
+
 
 ## References
 
