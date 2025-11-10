@@ -55,6 +55,27 @@ cargo-mangling/
 ```bash
 cargo build --manifest-path mid-a/Cargo.toml && cargo build --manifest-path mid-b/Cargo.toml
 ```
+## How Can I Check the Duplication?
+```bash
+$ cargo tree --duplicates
+idna v0.1.5
+└── url v1.7.2
+    └── mid_a v0.1.0 (/home/yudaitnb/cargo-mangling-examples/mid-a)
+        └── app v0.1.0 (/home/yudaitnb/cargo-mangling-examples/app)
+
+idna v0.5.0
+└── url v2.5.2
+    └── mid_b v0.1.0 (/home/yudaitnb/cargo-mangling-examples/mid-b)
+        └── app v0.1.0 (/home/yudaitnb/cargo-mangling-examples/app)
+
+percent-encoding v1.0.1
+└── url v1.7.2 (*)
+
+percent-encoding v2.3.1
+├── form_urlencoded v1.2.1
+│   └── url v2.5.2 (*)
+└── url v2.5.2 (*)
+```
 
 ## Scenarios
 
