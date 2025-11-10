@@ -191,5 +191,6 @@ note: required by a bound in `consume_target`
 - [HOW RUST SOLVED DEPENDENCY HELL](https://stephencoakley.com/2019/04/24/how-rust-solved-dependency-hell)
 - [Cargo Book – Registries](https://doc.rust-lang.org/cargo/reference/registries.html)  
 - [Cargo Book - Dependency Resolution](https://doc.rust-lang.org/cargo/reference/resolver.html#version-incompatibility-hazards)
+- [The dreaded diamond dependency problem](https://www.well-typed.com/blog/2008/04/the-dreaded-diamond-dependency-problem/)
 - [Issue 22750: Two different versions of a crate interacting leads to unhelpful error messages](https://github.com/rust-lang/rust/issues/22750)
   - [`check_and_note_conflicting_crates`](https://github.com/rust-lang/rust/blob/8401398e1f14a24670ee1a3203713dc2f0f8b3a8/compiler/rustc_trait_selection/src/error_reporting/infer/mod.rs#L393-L398)
