@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-url = "2"   # 2系
+url = "2"   # 2.y.z series
